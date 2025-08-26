@@ -51,6 +51,15 @@ enum InvestmentType: String, CaseIterable, Codable {
     case target = "目标导向"
 }
 
+// 目标计算类型
+enum TargetCalculationType: String, CaseIterable, Identifiable {
+    case timeToReachTarget = "达到目标需要的时间"
+    case monthlyContributionNeeded = "达到目标需要的月投资额"
+    case initialAmountNeeded = "达到目标需要的初始本金"
+    
+    var id: String { self.rawValue }
+}
+
 // 计算结果模型
 struct CalculationResult: Identifiable, Codable {
     var id = UUID()
@@ -68,6 +77,13 @@ struct CalculationResult: Identifiable, Codable {
     var monthlyContribution: Double?
     var inflationRate: Double?
     var realReturn: Double? // 实际收益率（扣除通胀）
+    
+    // 目标导向计算结果
+    var targetAmount: Double?
+    var calculationType: TargetCalculationType?
+    var yearsToTarget: Double? // 达到目标需要的精确年数
+    var monthlyNeeded: Double? // 达到目标需要的月投资额
+    var principalNeeded: Double? // 达到目标需要的初始本金
     
     // 用于图表显示的年度数据
     var yearlyData: [YearlyData]
@@ -279,10 +295,311 @@ class CompoundInterestCalculator {
             monthlyContribution: monthlyContribution > 0 ? monthlyContribution : nil,
             inflationRate: inflationRate > 0 ? inflationRate : nil,
             realReturn: inflationRate > 0 ? safeFinalAmount * (1 - inflationRate/100) : nil,
+            targetAmount: nil,
+            calculationType: nil,
+            yearsToTarget: nil,
+            monthlyNeeded: nil,
+            principalNeeded: nil,
             yearlyData: yearlyData
         )
         
         return .success(result)
+    }
+    
+    // 目标导向计算 - 计算达到目标需要的时间
+    static func calculateTimeToTarget(
+        targetAmount: Double,
+        principal: Double,
+        rate: Double,
+        frequency: CompoundFrequency,
+        monthlyContribution: Double = 0
+    ) -> Result<CalculationResult, CalculationError> {
+        do {
+            try validateInputs(principal: principal, rate: rate, years: 1, monthlyContribution: monthlyContribution)
+            guard targetAmount > principal else { 
+                return .failure(.invalidPrincipal)
+            }
+        } catch let error as CalculationError {
+            return .failure(error)
+        } catch {
+            return .failure(.calculationOverflow)
+        }
+        
+        let rateDecimal = rate / 100
+        let n = Double(frequency.timesPerYear)
+        let monthsPerYear = 12.0
+        
+        var years: Double = 0
+        
+        if monthlyContribution == 0 {
+            // 一次性投资的复利计算
+            // A = P(1 + r/n)^(nt)
+            // t = ln(A/P) / (n * ln(1 + r/n))
+            if rateDecimal > 0 && n > 0 {
+                let base = 1 + rateDecimal / n
+                years = log(targetAmount / principal) / (n * log(base))
+            } else {
+                // 简单利息
+                years = (targetAmount - principal) / (principal * rateDecimal)
+            }
+        } else {
+            // 定期投资的计算 - 使用二分法求解
+            years = calculateYearsForTargetWithContributions(
+                targetAmount: targetAmount,
+                principal: principal,
+                rate: rateDecimal,
+                frequency: n,
+                monthlyContribution: monthlyContribution
+            )
+        }
+        
+        // 限制在合理范围内
+        years = max(0.01, min(years, Double(CalculationConstants.maxYearsLimit)))
+        
+        // 生成年度数据
+        let (_, yearlyData) = calculateWithDecimal(
+            principal: Decimal(principal),
+            rate: Decimal(rate),
+            years: Int(ceil(years)),
+            frequency: frequency,
+            monthlyContribution: Decimal(monthlyContribution)
+        )
+        
+        return .success(CalculationResult(
+            principal: principal,
+            rate: rate,
+            years: Int(ceil(years)),
+            frequency: frequency.rawValue,
+            finalAmount: targetAmount,
+            totalInterest: targetAmount - (principal + monthlyContribution * 12 * years),
+            date: Date(),
+            note: "",
+            investmentType: .target,
+            monthlyContribution: monthlyContribution > 0 ? monthlyContribution : nil,
+            inflationRate: nil,
+            realReturn: nil,
+            targetAmount: targetAmount,
+            calculationType: .timeToReachTarget,
+            yearsToTarget: years,
+            monthlyNeeded: nil,
+            principalNeeded: nil,
+            yearlyData: yearlyData
+        ))
+    }
+    
+    // 计算达到目标需要的月投资额
+    static func calculateMonthlyContributionForTarget(
+        targetAmount: Double,
+        principal: Double,
+        rate: Double,
+        years: Int,
+        frequency: CompoundFrequency
+    ) -> Result<CalculationResult, CalculationError> {
+        do {
+            try validateInputs(principal: principal, rate: rate, years: years)
+            guard targetAmount > principal else {
+                return .failure(.invalidPrincipal)
+            }
+        } catch let error as CalculationError {
+            return .failure(error)
+        } catch {
+            return .failure(.calculationOverflow)
+        }
+        
+        let rateDecimal = rate / 100
+        let n = Double(frequency.timesPerYear)
+        let monthsTotal = Double(years * 12)
+        
+        // 计算本金复利后的金额
+        let principalFutureValue: Double
+        if rateDecimal > 0 && n > 0 {
+            let base = 1 + rateDecimal / n
+            principalFutureValue = principal * pow(base, n * Double(years))
+        } else {
+            principalFutureValue = principal * (1 + rateDecimal * Double(years))
+        }
+        
+        let remainingAmount = targetAmount - principalFutureValue
+        guard remainingAmount > 0 else {
+            // 本金复利已经达到目标
+            return .success(CalculationResult(
+                principal: principal,
+                rate: rate,
+                years: years,
+                frequency: frequency.rawValue,
+                finalAmount: targetAmount,
+                totalInterest: targetAmount - principal,
+                date: Date(),
+                note: "",
+                investmentType: .target,
+                monthlyContribution: 0,
+                inflationRate: nil,
+                realReturn: nil,
+                targetAmount: targetAmount,
+                calculationType: .monthlyContributionNeeded,
+                yearsToTarget: nil,
+                monthlyNeeded: 0,
+                principalNeeded: nil,
+                yearlyData: []
+            ))
+        }
+        
+        // 计算月投资额 - 使用年金现值公式
+        let monthlyRate = rateDecimal / 12
+        let monthlyContribution: Double
+        
+        if monthlyRate > 0 {
+            // 复利情况
+            let factor = (pow(1 + monthlyRate, monthsTotal) - 1) / monthlyRate
+            monthlyContribution = remainingAmount / factor
+        } else {
+            // 无利息情况
+            monthlyContribution = remainingAmount / monthsTotal
+        }
+        
+        // 生成年度数据
+        let (_, yearlyData) = calculateWithDecimal(
+            principal: Decimal(principal),
+            rate: Decimal(rate),
+            years: years,
+            frequency: frequency,
+            monthlyContribution: Decimal(monthlyContribution)
+        )
+        
+        return .success(CalculationResult(
+            principal: principal,
+            rate: rate,
+            years: years,
+            frequency: frequency.rawValue,
+            finalAmount: targetAmount,
+            totalInterest: targetAmount - (principal + monthlyContribution * 12 * Double(years)),
+            date: Date(),
+            note: "",
+            investmentType: .target,
+            monthlyContribution: monthlyContribution,
+            inflationRate: nil,
+            realReturn: nil,
+            targetAmount: targetAmount,
+            calculationType: .monthlyContributionNeeded,
+            yearsToTarget: nil,
+            monthlyNeeded: monthlyContribution,
+            principalNeeded: nil,
+            yearlyData: yearlyData
+        ))
+    }
+    
+    // 计算达到目标需要的初始本金
+    static func calculatePrincipalForTarget(
+        targetAmount: Double,
+        rate: Double,
+        years: Int,
+        frequency: CompoundFrequency,
+        monthlyContribution: Double = 0
+    ) -> Result<CalculationResult, CalculationError> {
+        do {
+            try validateInputs(principal: 1, rate: rate, years: years, monthlyContribution: monthlyContribution)
+        } catch let error as CalculationError {
+            return .failure(error)
+        } catch {
+            return .failure(.calculationOverflow)
+        }
+        
+        let rateDecimal = rate / 100
+        let n = Double(frequency.timesPerYear)
+        let monthsTotal = Double(years * 12)
+        
+        // 计算月投资额的未来价值
+        let monthlyFutureValue: Double
+        if monthlyContribution > 0 {
+            let monthlyRate = rateDecimal / 12
+            if monthlyRate > 0 {
+                let factor = (pow(1 + monthlyRate, monthsTotal) - 1) / monthlyRate
+                monthlyFutureValue = monthlyContribution * factor
+            } else {
+                monthlyFutureValue = monthlyContribution * monthsTotal
+            }
+        } else {
+            monthlyFutureValue = 0
+        }
+        
+        let remainingAmount = targetAmount - monthlyFutureValue
+        guard remainingAmount > 0 else {
+            return .failure(.invalidPrincipal)
+        }
+        
+        // 计算需要的本金
+        let principal: Double
+        if rateDecimal > 0 && n > 0 {
+            let base = 1 + rateDecimal / n
+            principal = remainingAmount / pow(base, n * Double(years))
+        } else {
+            principal = remainingAmount / (1 + rateDecimal * Double(years))
+        }
+        
+        // 生成年度数据
+        let (_, yearlyData) = calculateWithDecimal(
+            principal: Decimal(principal),
+            rate: Decimal(rate),
+            years: years,
+            frequency: frequency,
+            monthlyContribution: Decimal(monthlyContribution)
+        )
+        
+        return .success(CalculationResult(
+            principal: principal,
+            rate: rate,
+            years: years,
+            frequency: frequency.rawValue,
+            finalAmount: targetAmount,
+            totalInterest: targetAmount - (principal + monthlyContribution * 12 * Double(years)),
+            date: Date(),
+            note: "",
+            investmentType: .target,
+            monthlyContribution: monthlyContribution > 0 ? monthlyContribution : nil,
+            inflationRate: nil,
+            realReturn: nil,
+            targetAmount: targetAmount,
+            calculationType: .initialAmountNeeded,
+            yearsToTarget: nil,
+            monthlyNeeded: nil,
+            principalNeeded: principal,
+            yearlyData: yearlyData
+        ))
+    }
+    
+    // 二分法计算达到目标需要的年数（有定期投资时）
+    private static func calculateYearsForTargetWithContributions(
+        targetAmount: Double,
+        principal: Double,
+        rate: Double,
+        frequency: Double,
+        monthlyContribution: Double
+    ) -> Double {
+        var low = 0.01
+        var high = Double(CalculationConstants.maxYearsLimit)
+        let tolerance = 0.01
+        
+        while high - low > tolerance {
+            let mid = (low + high) / 2
+            let months = Int(mid * 12)
+            
+            var amount = principal
+            let monthlyRate = rate / 12
+            
+            // 模拟计算
+            for _ in 1...months {
+                amount += monthlyContribution
+                amount *= (1 + monthlyRate)
+            }
+            
+            if amount < targetAmount {
+                low = mid
+            } else {
+                high = mid
+            }
+        }
+        
+        return (low + high) / 2
     }
     
     // 传统方法保持向后兼容
@@ -388,6 +705,11 @@ class CompoundInterestCalculator {
             monthlyContribution: nil,
             inflationRate: nil,
             realReturn: nil,
+            targetAmount: nil,
+            calculationType: nil,
+            yearsToTarget: nil,
+            monthlyNeeded: nil,
+            principalNeeded: nil,
             yearlyData: yearlyData
         )
     }

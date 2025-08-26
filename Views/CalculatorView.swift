@@ -25,11 +25,16 @@ struct CalculatorView: View {
     @State private var errorMessage = ""
     @State private var isCalculating = false
     
+    // 目标导向计算状态
+    @State private var targetAmount: String = ""
+    @State private var targetCalculationType: TargetCalculationType = .timeToReachTarget
+    
     // 输入验证状态
     @State private var principalError: String? = nil
     @State private var rateError: String? = nil
     @State private var yearsError: String? = nil
     @State private var monthlyContributionError: String? = nil
+    @State private var targetAmountError: String? = nil
     
     private var formattedPrincipal: Double? {
         return Double(principal.replacingOccurrences(of: ",", with: ""))
@@ -51,6 +56,10 @@ struct CalculatorView: View {
     private var formattedInflationRate: Double? {
         let value = Double(inflationRate) ?? 0
         return value >= 0 ? value : nil
+    }
+    
+    private var formattedTargetAmount: Double? {
+        return Double(targetAmount.replacingOccurrences(of: ",", with: ""))
     }
     
     // 实时输入验证
@@ -94,6 +103,23 @@ struct CalculatorView: View {
         } else {
             monthlyContributionError = nil
         }
+        
+        // 验证目标金额（仅当选择目标导向时）
+        if investmentType == .target {
+            if let t = formattedTargetAmount {
+                if t <= 0 {
+                    targetAmountError = "目标金额必须大于0"
+                } else if let p = formattedPrincipal, t <= p {
+                    targetAmountError = "目标金额必须大于本金"
+                } else {
+                    targetAmountError = nil
+                }
+            } else {
+                targetAmountError = targetAmount.isEmpty ? nil : "请输入有效的目标金额"
+            }
+        } else {
+            targetAmountError = nil
+        }
     }
     
     private var isFormValid: Bool {
@@ -102,7 +128,7 @@ struct CalculatorView: View {
               let years = formattedYears
         else { return false }
         
-        return principal > 0 && 
+        let baseValidation = principal > 0 && 
                rate >= CalculationConstants.minValidRate && 
                rate <= CalculationConstants.maxValidRate &&
                years > 0 && 
@@ -111,6 +137,28 @@ struct CalculatorView: View {
                rateError == nil &&
                yearsError == nil &&
                monthlyContributionError == nil
+        
+        // 目标导向计算需要额外验证
+        if investmentType == .target {
+            guard let targetAmount = formattedTargetAmount,
+                  targetAmount > principal,
+                  targetAmountError == nil else {
+                return false
+            }
+        }
+        
+        return baseValidation
+    }
+    
+    private var targetCalculationFooter: String {
+        switch targetCalculationType {
+        case .timeToReachTarget:
+            return "计算达到目标金额需要多少年"
+        case .monthlyContributionNeeded:
+            return "计算每月需要投资多少钱才能达到目标"
+        case .initialAmountNeeded:
+            return "计算需要多少初始本金才能达到目标"
+        }
     }
     
     var body: some View {
@@ -220,6 +268,54 @@ struct CalculatorView: View {
                     }
                 }
                 
+                // 目标导向计算选项
+                if investmentType == .target {
+                    Section(header: Text("目标设定"), footer: targetCalculationFooter) {
+                        // 目标金额输入
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("\(currencyManager.selectedCurrency.symbol)")
+                                TextField("目标金额", text: $targetAmount)
+                                    .keyboardType(.decimalPad)
+                                    .onChange(of: targetAmount) { _ in
+                                        validateInputs()
+                                    }
+                            }
+                            if let error = targetAmountError {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        
+                        // 计算类型选择
+                        Picker("计算类型", selection: $targetCalculationType) {
+                            ForEach(TargetCalculationType.allCases) { type in
+                                Text(type.rawValue).tag(type)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: targetCalculationType) { _ in
+                            validateInputs()
+                        }
+                        
+                        // 根据计算类型显示不同的输入字段
+                        if targetCalculationType == .monthlyContributionNeeded && monthlyContribution.isEmpty {
+                            Text("将计算达到目标金额需要的月投资额")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else if targetCalculationType == .initialAmountNeeded {
+                            Text("将计算达到目标金额需要的初始本金")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else if targetCalculationType == .timeToReachTarget {
+                            Text("将计算达到目标金额需要的时间")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
                 // 计算按钮
                 Section {
                     Button(action: {
@@ -241,19 +337,52 @@ struct CalculatorView: View {
                 // 计算结果显示
                 if let result = calculationResult {
                     Section(header: Text("计算结果")) {
-                        ResultRow(title: "本金", value: result.principal)
-                        if let monthlyContrib = result.monthlyContribution, monthlyContrib > 0 {
-                            ResultRow(title: "总投资额", value: result.principal + (monthlyContrib * 12 * Double(result.years)))
-                        }
-                        ResultRow(title: "最终金额", value: result.finalAmount)
-                        ResultRow(title: "利息收益", value: result.totalInterest)
-                        
-                        let totalInvestment = result.principal + ((result.monthlyContribution ?? 0) * 12 * Double(result.years))
-                        ResultRow(title: "收益率", value: (result.finalAmount - totalInvestment) / totalInvestment * 100, isPercentage: true)
-                        
-                        // 实际收益率（考虑通胀）
-                        if let inflationRate = result.inflationRate, inflationRate > 0 {
-                            ResultRow(title: "实际收益率", value: result.realReturnRate, isPercentage: true)
+                        // 显示不同类型的计算结果
+                        if result.investmentType == .target {
+                            // 目标导向计算结果
+                            if let targetAmount = result.targetAmount {
+                                ResultRow(title: "目标金额", value: targetAmount)
+                            }
+                            
+                            if let calculationType = result.calculationType {
+                                switch calculationType {
+                                case .timeToReachTarget:
+                                    if let years = result.yearsToTarget {
+                                        HStack {
+                                            Text("所需时间")
+                                            Spacer()
+                                            Text(String(format: "%.1f年", years))
+                                                .fontWeight(.bold)
+                                        }
+                                    }
+                                    
+                                case .monthlyContributionNeeded:
+                                    if let monthly = result.monthlyNeeded {
+                                        ResultRow(title: "每月投资额", value: monthly)
+                                    }
+                                    
+                                case .initialAmountNeeded:
+                                    if let principal = result.principalNeeded {
+                                        ResultRow(title: "所需本金", value: principal)
+                                    }
+                                }
+                            }
+                        } else {
+                            // 传统计算结果
+                            ResultRow(title: "本金", value: result.principal)
+                            if let monthlyContrib = result.monthlyContribution, monthlyContrib > 0 {
+                                ResultRow(title: "总投资额", value: result.principal + (monthlyContrib * 12 * Double(result.years)))
+                            }
+                            ResultRow(title: "最终金额", value: result.finalAmount)
+                            ResultRow(title: "利息收益", value: result.totalInterest)
+                            
+                            let totalInvestment = result.principal + ((result.monthlyContribution ?? 0) * 12 * Double(result.years))
+                            ResultRow(title: "收益率", value: (result.finalAmount - totalInvestment) / totalInvestment * 100, isPercentage: true)
+                            
+                            // 实际收益率（考虑通胀）
+                            if let inflationRate = result.inflationRate, inflationRate > 0 {
+                                ResultRow(title: "实际收益率", value: result.realReturnRate, isPercentage: true)
+                            }
                         }
                     }
                     
@@ -293,14 +422,59 @@ struct CalculatorView: View {
             let monthlyContrib = self.formattedMonthlyContribution ?? 0
             let inflation = self.formattedInflationRate ?? 0
             
-            let result = CompoundInterestCalculator.calculate(
-                principal: principal,
-                rate: rate,
-                years: years,
-                frequency: self.selectedFrequency,
-                monthlyContribution: monthlyContrib,
-                inflationRate: inflation
-            )
+            let result: Result<CalculationResult, CalculationError>
+            
+            // 根据投资类型选择不同的计算方法
+            switch self.investmentType {
+            case .lumpSum, .regular:
+                result = CompoundInterestCalculator.calculate(
+                    principal: principal,
+                    rate: rate,
+                    years: years,
+                    frequency: self.selectedFrequency,
+                    monthlyContribution: monthlyContrib,
+                    inflationRate: inflation
+                )
+                
+            case .target:
+                guard let targetAmount = self.formattedTargetAmount else {
+                    DispatchQueue.main.async {
+                        self.isCalculating = false
+                        self.errorMessage = "请输入目标金额"
+                        self.showingError = true
+                    }
+                    return
+                }
+                
+                switch self.targetCalculationType {
+                case .timeToReachTarget:
+                    result = CompoundInterestCalculator.calculateTimeToTarget(
+                        targetAmount: targetAmount,
+                        principal: principal,
+                        rate: rate,
+                        frequency: self.selectedFrequency,
+                        monthlyContribution: monthlyContrib
+                    )
+                    
+                case .monthlyContributionNeeded:
+                    result = CompoundInterestCalculator.calculateMonthlyContributionForTarget(
+                        targetAmount: targetAmount,
+                        principal: principal,
+                        rate: rate,
+                        years: years,
+                        frequency: self.selectedFrequency
+                    )
+                    
+                case .initialAmountNeeded:
+                    result = CompoundInterestCalculator.calculatePrincipalForTarget(
+                        targetAmount: targetAmount,
+                        rate: rate,
+                        years: years,
+                        frequency: self.selectedFrequency,
+                        monthlyContribution: monthlyContrib
+                    )
+                }
+            }
             
             DispatchQueue.main.async {
                 self.isCalculating = false
