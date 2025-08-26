@@ -44,8 +44,24 @@ struct SettingsView: View {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("1.0.0")
+                        Text("2.0.0")
                             .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Text("更新内容")
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("• 增强计算精度")
+                                .font(.caption)
+                            Text("• 目标导向计算")
+                                .font(.caption)
+                            Text("• 定期投资功能")
+                                .font(.caption)
+                            Text("• 通胀率调整")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.secondary)
                     }
                 }
             }

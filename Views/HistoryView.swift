@@ -77,8 +77,15 @@ struct HistoryRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("本金: \(currencyManager.formatAmount(result.principal))")
-                    .fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("本金: \(currencyManager.formatAmount(result.principal))")
+                        .fontWeight(.medium)
+                    if let investmentType = result.investmentType {
+                        Text(investmentTypeDescription)
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                }
                 Spacer()
                 Text(formattedDate(result.date))
                     .font(.caption)
@@ -95,8 +102,21 @@ struct HistoryRowView: View {
             HStack {
                 Text("期限: \(result.years)年")
                 Spacer()
-                Text("最终收益: \(currencyManager.formatAmount(result.finalAmount))")
-                    .fontWeight(.bold)
+                if result.investmentType == .target {
+                    Text("目标: \(currencyManager.formatAmount(result.targetAmount ?? result.finalAmount))")
+                        .fontWeight(.bold)
+                        .foregroundColor(.green)
+                } else {
+                    Text("最终收益: \(currencyManager.formatAmount(result.finalAmount))")
+                        .fontWeight(.bold)
+                }
+            }
+            
+            // 显示月投资额或目标计算结果
+            if let monthlyContrib = result.monthlyContribution, monthlyContrib > 0 {
+                Text("月投资: \(currencyManager.formatAmount(monthlyContrib))")
+                    .font(.caption)
+                    .foregroundColor(.orange)
             }
             
             if !result.note.isEmpty {
@@ -106,6 +126,22 @@ struct HistoryRowView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    private var investmentTypeDescription: String {
+        guard let type = result.investmentType else { return "" }
+        
+        switch type {
+        case .lumpSum:
+            return "一次性投资"
+        case .regular:
+            return "定期投资"
+        case .target:
+            if let calcType = result.calculationType {
+                return calcType.rawValue
+            }
+            return "目标导向"
+        }
     }
     
     private func formattedDate(_ date: Date) -> String {
@@ -136,13 +172,54 @@ struct HistoryDetailView: View {
                     DetailRow(title: "年利率", value: "\(String(format: "%.2f", result.rate))%")
                     DetailRow(title: "投资期限", value: "\(result.years)年")
                     DetailRow(title: "复利频率", value: result.frequency)
+                    if let investmentType = result.investmentType {
+                        DetailRow(title: "投资类型", value: investmentType.rawValue)
+                    }
+                    if let monthlyContrib = result.monthlyContribution, monthlyContrib > 0 {
+                        DetailRow(title: "月投资额", value: currencyManager.formatAmount(monthlyContrib))
+                    }
+                    if let inflationRate = result.inflationRate, inflationRate > 0 {
+                        DetailRow(title: "通胀率", value: "\(String(format: "%.2f", inflationRate))%")
+                    }
                     DetailRow(title: "计算日期", value: formattedDate(result.date))
                 }
                 
                 Section(header: Text("计算结果")) {
-                    DetailRow(title: "最终金额", value: currencyManager.formatAmount(result.finalAmount))
-                    DetailRow(title: "利息收益", value: currencyManager.formatAmount(result.totalInterest))
-                    DetailRow(title: "收益率", value: "\(String(format: "%.2f", result.totalInterest / result.principal * 100))%")
+                    if result.investmentType == .target {
+                        // 目标导向结果显示
+                        if let targetAmount = result.targetAmount {
+                            DetailRow(title: "目标金额", value: currencyManager.formatAmount(targetAmount))
+                        }
+                        if let calcType = result.calculationType {
+                            DetailRow(title: "计算类型", value: calcType.rawValue)
+                            
+                            switch calcType {
+                            case .timeToReachTarget:
+                                if let years = result.yearsToTarget {
+                                    DetailRow(title: "所需时间", value: "\(String(format: "%.1f", years))年")
+                                }
+                            case .monthlyContributionNeeded:
+                                if let monthly = result.monthlyNeeded {
+                                    DetailRow(title: "每月投资额", value: currencyManager.formatAmount(monthly))
+                                }
+                            case .initialAmountNeeded:
+                                if let principal = result.principalNeeded {
+                                    DetailRow(title: "所需本金", value: currencyManager.formatAmount(principal))
+                                }
+                            }
+                        }
+                    } else {
+                        // 传统结果显示
+                        DetailRow(title: "最终金额", value: currencyManager.formatAmount(result.finalAmount))
+                        DetailRow(title: "利息收益", value: currencyManager.formatAmount(result.totalInterest))
+                        
+                        let totalInvestment = result.principal + ((result.monthlyContribution ?? 0) * 12 * Double(result.years))
+                        DetailRow(title: "收益率", value: "\(String(format: "%.2f", (result.finalAmount - totalInvestment) / totalInvestment * 100))%")
+                        
+                        if let inflationRate = result.inflationRate, inflationRate > 0 {
+                            DetailRow(title: "实际收益率", value: "\(String(format: "%.2f", result.realReturnRate))%")
+                        }
+                    }
                 }
                 
                 Section(header: Text("收益趋势")) {
