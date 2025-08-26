@@ -19,6 +19,12 @@ class HistoryManager: ObservableObject {
     
     func addToHistory(_ result: CalculationResult) {
         history.insert(result, at: 0)
+        
+        // 限制历史记录数量以优化性能
+        if history.count > CalculationConstants.maxHistoryItems {
+            history = Array(history.prefix(CalculationConstants.maxHistoryItems))
+        }
+        
         saveHistory()
     }
     

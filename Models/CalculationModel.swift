@@ -14,6 +14,8 @@ struct CalculationConstants {
     static let minValidRate = -99.99 // 最低利率限制
     static let maxValidRate = 999.99 // 最高利率限制
     static let maxDataPointsForChart = 50 // 图表最大数据点
+    static let calculationTimeout = 30.0 // 计算超时时间(秒)
+    static let maxHistoryItems = 1000 // 最大历史记录数量
 }
 
 // 复利频率枚举

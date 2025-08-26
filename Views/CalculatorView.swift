@@ -187,6 +187,8 @@ struct CalculatorView: View {
                                 .onChange(of: principal) { _ in
                                     validateInputs()
                                 }
+                                .accessibilityLabel("投资本金")
+                                .accessibilityHint("输入初始投资金额")
                         }
                         if let error = principalError {
                             Text(error)
@@ -203,6 +205,8 @@ struct CalculatorView: View {
                                 .onChange(of: rate) { _ in
                                     validateInputs()
                                 }
+                                .accessibilityLabel("年化利率")
+                                .accessibilityHint("输入预期年化收益率")
                             Text("%")
                         }
                         if let error = rateError {
@@ -220,6 +224,8 @@ struct CalculatorView: View {
                                 .onChange(of: years) { _ in
                                     validateInputs()
                                 }
+                                .accessibilityLabel("投资年限")
+                                .accessibilityHint("输入投资持续时间")
                             Text("年")
                         }
                         if let error = yearsError {
