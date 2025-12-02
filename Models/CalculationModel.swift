@@ -7,7 +7,8 @@
 
 import Foundation
 
-// 复利频率枚举
+/// 复利频率枚举
+/// Defines the compounding frequency options for interest calculations
 enum CompoundFrequency: String, CaseIterable, Identifiable {
     case annually = "年"
     case quarterly = "季度"
@@ -16,6 +17,7 @@ enum CompoundFrequency: String, CaseIterable, Identifiable {
     
     var id: String { self.rawValue }
     
+    /// Returns the number of compounding periods per year
     var timesPerYear: Int {
         switch self {
         case .annually: return 1
@@ -24,10 +26,21 @@ enum CompoundFrequency: String, CaseIterable, Identifiable {
         case .daily: return 365
         }
     }
+    
+    /// Localized description for accessibility
+    var accessibilityDescription: String {
+        switch self {
+        case .annually: return "每年复利一次"
+        case .quarterly: return "每季度复利一次"
+        case .monthly: return "每月复利一次"
+        case .daily: return "每日复利一次"
+        }
+    }
 }
 
-// 计算结果模型
-struct CalculationResult: Identifiable, Codable {
+/// 计算结果模型
+/// Stores the result of a compound interest calculation
+struct CalculationResult: Identifiable, Codable, Equatable {
     var id = UUID()
     var principal: Double
     var rate: Double
@@ -38,18 +51,96 @@ struct CalculationResult: Identifiable, Codable {
     var date: Date
     var note: String
     
-    // 用于图表显示的年度数据
+    /// 用于图表显示的年度数据
     var yearlyData: [YearlyData]
     
-    struct YearlyData: Identifiable, Codable {
+    /// Represents the accumulated amount at a specific year
+    struct YearlyData: Identifiable, Codable, Equatable {
         var id = UUID()
         var year: Int
         var amount: Double
+        
+        static func == (lhs: YearlyData, rhs: YearlyData) -> Bool {
+            return lhs.year == rhs.year && lhs.amount == rhs.amount
+        }
+    }
+    
+    /// 计算收益率百分比
+    var returnPercentage: Double {
+        guard principal > 0 else { return 0 }
+        return (totalInterest / principal) * 100
+    }
+    
+    /// 格式化的收益率字符串
+    var formattedReturnPercentage: String {
+        return String(format: "%.2f%%", returnPercentage)
+    }
+    
+    static func == (lhs: CalculationResult, rhs: CalculationResult) -> Bool {
+        return lhs.id == rhs.id
     }
 }
 
-// 复利计算逻辑
+/// 复利计算逻辑
+/// Provides methods to calculate compound interest
 class CompoundInterestCalculator {
+    
+    /// Input validation errors
+    enum ValidationError: LocalizedError {
+        case invalidPrincipal
+        case invalidRate
+        case invalidYears
+        case rateOutOfRange
+        case yearsOutOfRange
+        
+        var errorDescription: String? {
+            switch self {
+            case .invalidPrincipal: return "请输入有效的本金金额"
+            case .invalidRate: return "请输入有效的年利率"
+            case .invalidYears: return "请输入有效的投资年限"
+            case .rateOutOfRange: return "年利率应在 0% 到 100% 之间"
+            case .yearsOutOfRange: return "投资年限应在 1 到 100 年之间"
+            }
+        }
+    }
+    
+    /// Maximum allowed years for calculation
+    static let maxYears = 100
+    
+    /// Maximum allowed interest rate (as percentage)
+    static let maxRate: Double = 100.0
+    
+    /// Validates input parameters before calculation
+    /// - Parameters:
+    ///   - principal: The initial investment amount
+    ///   - rate: The annual interest rate (as percentage)
+    ///   - years: The investment duration in years
+    /// - Throws: ValidationError if inputs are invalid
+    static func validateInputs(principal: Double?, rate: Double?, years: Int?) throws {
+        guard let principal = principal, principal > 0 else {
+            throw ValidationError.invalidPrincipal
+        }
+        guard let rate = rate else {
+            throw ValidationError.invalidRate
+        }
+        guard rate >= 0 && rate <= maxRate else {
+            throw ValidationError.rateOutOfRange
+        }
+        guard let years = years else {
+            throw ValidationError.invalidYears
+        }
+        guard years > 0 && years <= maxYears else {
+            throw ValidationError.yearsOutOfRange
+        }
+    }
+    
+    /// Calculates compound interest with the given parameters
+    /// - Parameters:
+    ///   - principal: The initial investment amount
+    ///   - rate: The annual interest rate (as percentage, e.g., 5 for 5%)
+    ///   - years: The number of years for the investment
+    ///   - frequency: How often interest is compounded
+    /// - Returns: A CalculationResult containing all calculation details
     static func calculate(
         principal: Double,
         rate: Double,
