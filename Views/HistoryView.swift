@@ -74,6 +74,11 @@ struct HistoryRowView: View {
     @EnvironmentObject private var currencyManager: CurrencyManager
     var result: CalculationResult
     
+    /// 生成无障碍摘要
+    private var accessibilitySummary: String {
+        return "本金\(currencyManager.formatAmount(result.principal))，利率\(String(format: "%.2f", result.rate))%，期限\(result.years)年，最终收益\(currencyManager.formatAmount(result.finalAmount))"
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -106,6 +111,9 @@ struct HistoryRowView: View {
             }
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint("点击查看详细信息")
     }
     
     private func formattedDate(_ date: Date) -> String {
@@ -213,6 +221,8 @@ struct DetailRow: View {
             Text(value)
                 .fontWeight(.medium)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 }
 
