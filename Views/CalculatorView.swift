@@ -224,7 +224,7 @@ struct CalculatorView: View {
     
     private func resetForm() {
         triggerHapticFeedback(.light)
-        withAnimation {
+        withAnimation(.easeInOut(duration: 0.3)) {
             calculationResult = nil
         }
     }
